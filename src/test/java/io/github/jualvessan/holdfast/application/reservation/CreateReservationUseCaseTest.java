@@ -6,6 +6,7 @@ import io.github.jualvessan.holdfast.domain.inventory.InsufficientStockException
 import io.github.jualvessan.holdfast.domain.inventory.Sector;
 import io.github.jualvessan.holdfast.domain.inventory.SectorNotFoundException;
 import io.github.jualvessan.holdfast.domain.reservation.IdempotencyConflictException;
+import io.github.jualvessan.holdfast.domain.reservation.Reservation;
 import io.github.jualvessan.holdfast.domain.reservation.ReservationStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -122,6 +123,32 @@ class CreateReservationUseCaseTest {
 
         assertThat(second.reservationId()).isNotEqualTo(first.reservationId());
         assertThat(sectors.availableOf(SECTOR_ID)).isEqualTo(6);
+    }
+
+    @Test
+    void aDuplicateThatLosesTheRaceNearSoldOutStillGetsTheOriginalReservation() {
+        Reservation winner = Reservation.createPending(
+                "winner-id", SECTOR_ID, 10, 15_000, "key-1", "hash-a", NOW.plus(HOLD_DURATION), NOW);
+        // Simulates the race: while this request waits on the sector row, the winner
+        // commits its reservation and takes the last units, so tryReserve finds none left.
+        InMemorySectorRepository racedSectors = new InMemorySectorRepository() {
+            @Override
+            public boolean tryReserve(String sectorId, int quantity) {
+                reservations.save(winner);
+                return false;
+            }
+        };
+        racedSectors.add(new Sector(SECTOR_ID, "event-1", "Floor", 15_000, 10, 10));
+        CreateReservationUseCase racing = new CreateReservationUseCase(
+                reservations, racedSectors, new SequentialIdGenerator(),
+                Clock.fixed(NOW, ZoneOffset.UTC), HOLD_DURATION);
+
+        ReservationResult result = racing.execute(command(10, "key-1", "hash-a"));
+
+        assertThat(result.reservationId())
+                .as("a retry must get the original reservation, not a 409")
+                .isEqualTo("winner-id");
+        assertThat(reservations.all()).hasSize(1);
     }
 
     private static CreateReservationCommand command(int quantity, String idempotencyKey, String requestHash) {

@@ -69,6 +69,14 @@ public class CreateReservationUseCase {
                 .orElseThrow(() -> new SectorNotFoundException(command.sectorId()));
 
         if (!sectorRepository.tryReserve(command.sectorId(), command.quantity())) {
+            // Near sold-out, a duplicate of an already-successful request can lose the
+            // race on the sector row: the winner committed and took the last units while
+            // this request waited. That is a retry, not a failure, so look the key up once
+            // more before answering "no stock".
+            Optional<Reservation> winner = reservationRepository.findByIdempotencyKey(command.idempotencyKey());
+            if (winner.isPresent()) {
+                return replayOrReject(winner.get(), command);
+            }
             throw new InsufficientStockException(command.sectorId(), command.quantity());
         }
 

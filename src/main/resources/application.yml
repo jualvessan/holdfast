@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: holdfast
+
+  # Local development credentials, matching docker-compose.yml.
+  # They are not secrets worth protecting; production configuration is
+  # revisited with Kubernetes Secrets in Phase 6 (see ADR-0000).
+  datasource:
+    url: jdbc:oracle:thin:@//localhost:1521/FREEPDB1
+    username: holdfast
+    password: holdfast_dev
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: none   # the schema belongs to Flyway, never to Hibernate
+
+  flyway:
+    enabled: true
+
+holdfast:
+  reservation:
+    hold-duration: PT10M
